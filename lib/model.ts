@@ -8,11 +8,12 @@
 //
 // Implied value follows only from the snapshot's own figures:
 //
-//   base       = tvl_usd x BASE_MULTIPLE
-//   growth     = clamp(change_7d, -60, 120) per cent
-//   growthMult = 1 + (growth / 100) x GROWTH_WEIGHT
-//   maturity   = 0.6 + min(age_days, 1095) / 1095 x 0.4   (age_days unknown: 365)
-//   implied    = max(1, round(base x growthMult x maturity))
+//   base           = tvl_usd x BASE_MULTIPLE
+//   growth         = clamp(change_7d, -60, 120) per cent
+//   growthMult     = 1 + (growth / 100) x GROWTH_WEIGHT
+//   preTokenMult   = 1 + (min(ageForModel, maturity_days) / maturity_days) x PRETOKEN_WEIGHT
+//   maturity       = 0.6 + min(age_days, 1095) / 1095 x 0.4   (age_days unknown: 365)
+//   implied        = max(1, round(base x growthMult x preTokenMult x maturity))
 //
 // The constants are the house model's, stated in the dashboard and changeable in the model sandbox. No
 // protocol name is ever special-cased: the same function scores every row.
@@ -50,7 +51,6 @@ export interface ModelConstants {
   maturity_range: number;
   maturity_days: number;
   unknown_age_days: number;
-  /** Weight for the pre-token age multiplier: how much extra value older pre-token protocols get. */
   pretoken_weight: number;
 }
 
@@ -63,7 +63,6 @@ export const MODEL: ModelConstants = {
   maturity_range: 0.4,
   maturity_days: 1095,
   unknown_age_days: 365,
-  /** Weight for the pre-token age bonus: 0.25 means a 3-year-old pre-token gets ~1.25x vs a brand-new one. */
   pretoken_weight: 0.25,
 };
 
@@ -104,6 +103,7 @@ export interface BoardRow {
     growth_pct: number;
     growth_multiplier: number;
     maturity_multiplier: number;
+    pretoken_multiplier: number;
     age_days: number | null;
   };
   farm_steps: string[];
@@ -124,6 +124,7 @@ export interface RadarRow {
   implied_value_usd: number;
   growth_multiplier: number;
   maturity_multiplier: number;
+  pretoken_multiplier: number;
 }
 
 /** A live-token protocol: it already trades, so the board shows the market's own value, not a model's. */
@@ -183,11 +184,11 @@ export function impliedValue(protocol: SnapshotProtocol, asOf: string, model: Mo
   const growthPct = Math.min(model.growth_cap, Math.max(model.growth_floor, rawGrowth));
   const growthMult = 1 + (growthPct / 100) * model.growth_weight;
   const ageForModel = age ?? model.unknown_age_days;
+  const pretokenMult = 1 + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.pretoken_weight;
   const maturityMult = model.maturity_floor + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.maturity_range;
-  const preTokenMult = 1 + (Math.min(Math.max(ageForModel, 0), model.maturity_days) / model.maturity_days) * model.pretoken_weight;
   const base = protocol.tvl_usd * model.base_multiple;
-  const implied = Math.max(1, Math.round(base * growthMult * maturityMult * preTokenMult));
-  return { implied, growthPct, growthMult, maturityMult, pretokenMult: preTokenMult, age };
+  const implied = Math.max(1, Math.round(base * growthMult * pretokenMult * maturityMult));
+  return { implied, growthPct, growthMult, maturityMult, pretokenMult, age };
 }
 
 /** DefiLlama's version-marker rule: a name ending in a release is a pool of another protocol. */
@@ -390,6 +391,7 @@ export function radarRow(row: BoardRow): RadarRow {
     implied_value_usd: row.implied_value_usd,
     growth_multiplier: row.model.growth_multiplier,
     maturity_multiplier: row.model.maturity_multiplier,
+    pretoken_multiplier: row.model.pretoken_multiplier,
   };
 }
 
